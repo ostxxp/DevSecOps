@@ -571,7 +571,7 @@ function dvwaDatabaseConnect() {
 		|| !@((bool)mysqli_query($GLOBALS["___mysqli_ston"], "USE " . $_DVWA[ 'db_database' ])) ) {
 			//die( $DBMS_connError );
 			dvwaLogout();
-			dvwaMessagePush( 'Unable to connect to the database.<br />' . mysqli_error($GLOBALS["___mysqli_ston"]));
+			//dvwaMessagePush( 'Unable to connect to the database.<br />' . mysqli_error($GLOBALS["___mysqli_ston"]));
 			dvwaRedirect( DVWA_WEB_PAGE_TO_ROOT . 'setup.php' );
 		}
 		// MySQL PDO Prepared Statements (for impossible levels)

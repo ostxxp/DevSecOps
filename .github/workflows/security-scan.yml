@@ -26,71 +26,50 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/.dependency-check/data
-          key: dependency-check-db-${{ runner.os }}-v1
+          key: dependency-check-db-${{ runner.os }}-v2
           restore-keys: |
             dependency-check-db-${{ runner.os }}-
 
-      - name: Run Dependency Check (SCA) with Docker
+      - name: Run Dependency Check (SCA)
         continue-on-error: true
-        timeout-minutes: 60
+        timeout-minutes: 90
         run: |
-          echo "🔍 Starting Dependency Check scan using Docker..."
+          echo "🔍 Starting Dependency Check scan..."
           
           mkdir -p reports
           mkdir -p ~/.dependency-check/data
           
-          # Кэшируем базу данных между запусками
+          # Проверяем наличие базы данных
           DB_FILES=$(find ~/.dependency-check/data -type f 2>/dev/null | wc -l)
           
           if [ "$DB_FILES" -gt 50 ]; then
             echo "✅ Using cached database ($DB_FILES files)"
-            echo "Running scan with --noupdate"
-            docker run --rm \
-              -v "$PWD:/src" \
-              -v "$PWD/reports:/report" \
-              -v "$HOME/.dependency-check/data:/usr/share/dependency-check/data" \
-              owasp/dependency-check:latest \
-              --scan /src/app \
-              --format HTML \
-              --format JSON \
-              --out /report \
-              --project "DVWA" \
-              --noupdate \
-              --enableExperimental \
-              --failOnCVSS 11 || {
-                echo "⚠️ Scan completed with warnings"
-              }
+            USE_NOUPDATE="--noupdate"
           else
             echo "⚠️ No cached database found ($DB_FILES files)"
-            echo "Updating database first (this will take 30-60 minutes)..."
-            echo "Using JSON feeds (no API key needed)"
-            
-            # Сначала обновляем базу данных
-            docker run --rm \
-              -v "$HOME/.dependency-check/data:/usr/share/dependency-check/data" \
-              owasp/dependency-check:latest \
-              --updateonly || {
-                echo "⚠️ Database update had errors, but will continue"
-              }
-            
-            # Затем запускаем сканирование
-            echo "Running scan with updated database..."
-            docker run --rm \
-              -v "$PWD:/src" \
-              -v "$PWD/reports:/report" \
-              -v "$HOME/.dependency-check/data:/usr/share/dependency-check/data" \
-              owasp/dependency-check:latest \
-              --scan /src/app \
-              --format HTML \
-              --format JSON \
-              --out /report \
-              --project "DVWA" \
-              --noupdate \
-              --enableExperimental \
-              --failOnCVSS 11 || {
-                echo "⚠️ Scan completed with warnings"
-              }
+            echo "Will update database during scan (this may take 30-60 minutes)"
+            USE_NOUPDATE=""
           fi
+          
+          # Используем Docker для изоляции
+          # Важно: используем отдельный volume для базы данных, чтобы избежать блокировок
+          docker run --rm \
+            -v "$PWD:/src" \
+            -v "$PWD/reports:/report" \
+            -v "$HOME/.dependency-check/data:/data" \
+            -e DATA_DIRECTORY=/data \
+            owasp/dependency-check:latest \
+            --scan /src/app \
+            --format HTML \
+            --format JSON \
+            --out /report \
+            --project "DVWA" \
+            --data /data \
+            $USE_NOUPDATE \
+            --enableExperimental \
+            --failOnCVSS 11 || {
+              echo "⚠️ Scan completed with warnings"
+            }
           
           echo "✅ Scan completed!"
 

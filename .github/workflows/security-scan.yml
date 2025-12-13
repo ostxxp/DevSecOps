@@ -14,3 +14,44 @@ jobs:
         uses: SonarSource/sonarqube-scan-action@v4
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  dependency-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install OWASP Dependency Check
+        run: |
+          wget https://github.com/jeremylong/DependencyCheck/releases/download/v9.0.9/dependency-check-9.0.9-release.zip
+          unzip dependency-check-9.0.9-release.zip -d dependency-check
+          chmod +x dependency-check/bin/dependency-check.sh
+
+      - name: Update Dependency Check Database
+        run: |
+          ./dependency-check/bin/dependency-check.sh \
+            --updateonly \
+            --nvdApiKey "${{ secrets.NVD_API_KEY }}" \
+            --nvdApiDelay 6000 || true
+
+      - name: Run Dependency Check (SCA)
+        run: |
+          mkdir -p reports
+          ./dependency-check/bin/dependency-check.sh \
+            --project "DVWA" \
+            --scan ./app \
+            --format JSON \
+            --format HTML \
+            --out ./reports \
+            --nvdApiKey "${{ secrets.NVD_API_KEY }}" \
+            --nvdApiDelay 6000 \
+            --enableExperimental \
+            --failOnCVSS 11 || true
+
+      - name: Upload Reports Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: reports/
+          retention-days: 30

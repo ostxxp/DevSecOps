@@ -106,58 +106,76 @@ jobs:
           # Method 1: Try with API key using config file
           if [ -n "$NVD_API_KEY" ]; then
             echo "Method 1: Updating with API key (from config file)..."
-            ./dependency-check/dependency-check/bin/dependency-check.sh \
+            if ./dependency-check/dependency-check/bin/dependency-check.sh \
               --updateonly \
               --nvdApiDelay 60000 \
-              --nvdMaxRetryCount 5 || {
-                echo "Method 1 failed, trying Method 2..."
-                
-                # Method 2: Try with API key as parameter
-                echo "Method 2: Updating with API key (as parameter)..."
-                ./dependency-check/dependency-check/bin/dependency-check.sh \
-                  --updateonly \
-                  --nvdApiKey "$NVD_API_KEY" \
-                  --nvdApiDelay 60000 \
-                  --nvdMaxRetryCount 5 || {
-                    echo "Method 2 failed, trying Method 3..."
-                    UPDATE_SUCCESS=false
-                  } && UPDATE_SUCCESS=true
-              } && UPDATE_SUCCESS=true
+              --nvdMaxRetryCount 5 2>&1 | tee /tmp/dc-update.log; then
+              UPDATE_SUCCESS=true
+            else
+              echo "Method 1 failed, trying Method 2..."
+              
+              # Method 2: Try with API key as parameter
+              echo "Method 2: Updating with API key (as parameter)..."
+              if ./dependency-check/dependency-check/bin/dependency-check.sh \
+                --updateonly \
+                --nvdApiKey "$NVD_API_KEY" \
+                --nvdApiDelay 60000 \
+                --nvdMaxRetryCount 5 2>&1 | tee /tmp/dc-update.log; then
+                UPDATE_SUCCESS=true
+              else
+                echo "Method 2 failed, trying Method 3..."
+                UPDATE_SUCCESS=false
+              fi
+            fi
           fi
           
           # Method 3: Try without API key (very slow, but may work)
-          if [ "$UPDATE_SUCCESS" = false ]; then
+          if [ "$UPDATE_SUCCESS" != "true" ]; then
             echo "Method 3: Updating without API key (this will be VERY slow, 30+ minutes)..."
             echo "NVD rate limits: 5 requests per 30 seconds without API key"
-            timeout 2400 ./dependency-check/dependency-check/bin/dependency-check.sh \
-              --updateonly && UPDATE_SUCCESS=true || {
-                echo "Method 3 also failed"
-                UPDATE_SUCCESS=false
-              }
+            if timeout 2400 ./dependency-check/dependency-check/bin/dependency-check.sh \
+              --updateonly 2>&1 | tee /tmp/dc-update.log; then
+              UPDATE_SUCCESS=true
+            else
+              echo "Method 3 also failed"
+              UPDATE_SUCCESS=false
+            fi
           fi
           
-          # Check if database was created/updated
+          # Check if database was actually created/updated (verify by file count)
           if [ -d ~/.dependency-check/data ]; then
             DB_SIZE=$(du -sh ~/.dependency-check/data 2>/dev/null | cut -f1)
             FILE_COUNT=$(find ~/.dependency-check/data -type f 2>/dev/null | wc -l)
+            echo ""
+            echo "=== Database Status ==="
             echo "Database directory exists"
             echo "Database size: $DB_SIZE"
             echo "Number of files: $FILE_COUNT"
             
-            if [ "$FILE_COUNT" -gt 0 ]; then
-              echo "✅ Database appears to have data"
+            # Real check: database should have many files (typically 100+)
+            if [ "$FILE_COUNT" -gt 50 ]; then
+              echo "✅ Database appears to have data ($FILE_COUNT files)"
               ls -lh ~/.dependency-check/data/ | head -10
+              UPDATE_SUCCESS=true
             else
-              echo "⚠️ Database directory exists but appears empty"
+              echo "⚠️ Database directory exists but appears empty or incomplete ($FILE_COUNT files)"
+              echo "A proper database should have 100+ files"
+              UPDATE_SUCCESS=false
             fi
           else
             echo "❌ Database directory does not exist"
+            UPDATE_SUCCESS=false
           fi
           
+          echo ""
           if [ "$UPDATE_SUCCESS" = true ]; then
             echo "✅ Database update completed successfully"
           else
-            echo "⚠️ Database update failed - scan may still work with existing data"
+            echo "⚠️ Database update failed - database is empty or incomplete"
+            echo "This is a known issue with Dependency Check and NVD API"
+            echo ""
+            echo "Attempting alternative: Using scan with automatic update (may work during scan)..."
+            echo "This will be attempted during the scan phase"
           fi
 
       - name: Run Dependency Check (SCA)
@@ -171,12 +189,13 @@ jobs:
           
           # Check if database exists and has data
           DB_FILE_COUNT=$(find ~/.dependency-check/data -type f 2>/dev/null | wc -l)
-          if [ -d ~/.dependency-check/data ] && [ "$DB_FILE_COUNT" -gt 10 ]; then
+          if [ -d ~/.dependency-check/data ] && [ "$DB_FILE_COUNT" -gt 50 ]; then
             echo "✅ Database exists with data ($DB_FILE_COUNT files), using --noupdate"
             USE_NOUPDATE="--noupdate"
           else
-            echo "⚠️ Database is empty or doesn't exist ($DB_FILE_COUNT files found)"
-            echo "Attempting scan without --noupdate (will try to update during scan if possible)..."
+            echo "⚠️ Database is empty or doesn't exist ($DB_FILE_COUNT files found, need 50+)"
+            echo "Will attempt scan WITHOUT --noupdate to allow automatic update during scan"
+            echo "This may take 30-60 minutes but should work..."
             USE_NOUPDATE=""
           fi
           

@@ -159,10 +159,8 @@ jobs:
               
               # Disable API and use JSON feeds only
               mkdir -p ~/.dependency-check
-              cat > ~/.dependency-check/dependency-check.properties << EOF
-# Disable NVD API, use JSON feeds instead
-data.nvd.validForHours=0
-EOF
+              echo "# Disable NVD API, use JSON feeds instead" > ~/.dependency-check/dependency-check.properties
+              echo "data.nvd.validForHours=0" >> ~/.dependency-check/dependency-check.properties
               
               # Try update with very long timeout (60 minutes)
               if timeout 3600 ./dependency-check/dependency-check/bin/dependency-check.sh \

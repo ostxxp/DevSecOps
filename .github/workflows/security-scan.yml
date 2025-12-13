@@ -26,11 +26,11 @@ jobs:
         run: |
           wget https://github.com/jeremylong/DependencyCheck/releases/download/v9.0.9/dependency-check-9.0.9-release.zip
           unzip dependency-check-9.0.9-release.zip -d dependency-check
-          chmod +x dependency-check/bin/dependency-check.sh
+          chmod +x dependency-check/dependency-check/bin/dependency-check.sh
 
       - name: Update Dependency Check Database
         run: |
-          ./dependency-check/bin/dependency-check.sh \
+          ./dependency-check/dependency-check/bin/dependency-check.sh \
             --updateonly \
             --nvdApiKey "${{ secrets.NVD_API_KEY }}" \
             --nvdApiDelay 6000 || true
@@ -38,7 +38,7 @@ jobs:
       - name: Run Dependency Check (SCA)
         run: |
           mkdir -p reports
-          ./dependency-check/bin/dependency-check.sh \
+          ./dependency-check/dependency-check/bin/dependency-check.sh \
             --project "DVWA" \
             --scan ./app \
             --format JSON \

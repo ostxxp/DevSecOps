@@ -39,21 +39,23 @@ jobs:
       - name: Download and Install OWASP Dependency Check
         run: |
           echo "📦 Downloading OWASP Dependency Check..."
+          # Скачиваем версию 10.0.0
           wget -q https://github.com/jeremylong/DependencyCheck/releases/download/v10.0.0/dependency-check-10.0.0-release.zip
           unzip -q dependency-check-10.0.0-release.zip -d dependency-check
           chmod +x dependency-check/dependency-check/bin/dependency-check.sh
           
           echo "✅ Dependency Check installed"
+          # Проверяем версию и доступные аргументы
           ./dependency-check/dependency-check/bin/dependency-check.sh --version
 
       - name: Run Dependency Check Scan
         run: |
           echo "🔍 Starting Dependency Check scan..."
           
-          # Создаем папку для отчетов, если её нет
+          # Создаем папку для отчетов
           mkdir -p reports
           
-          # Запускаем сканирование с JSON фидами (работает без API ключа)
+          # ИСПРАВЛЕННАЯ КОМАНДА: убраны несуществующие аргументы
           ./dependency-check/dependency-check/bin/dependency-check.sh \
             --project "DVWA Security Scan" \
             --scan ./app \
@@ -64,11 +66,9 @@ jobs:
             --disableNodeJS \
             --disableRetireJS \
             --disableOssIndex \
-            --nvdApiDelay 2000 \
-            --nvdMaxRetryCount 10 \
-            --connectionTimeout 300000 \
-            --proxyserver "" \
-            --failOnCVSS 0
+            --nvdApiDelay 6000 \          # Пауза между запросами к NVD (в миллисекундах)
+            --nvdMaxRetryCount 10 \       # Количество попыток при ошибках сети
+            --failOnCVSS 0                 # Завершить с ошибкой при любой найденной уязвимости
           
           echo "✅ Scan completed!"
 
@@ -77,16 +77,38 @@ jobs:
           echo "📊 Checking generated reports..."
           if [ -f "reports/dependency-check-report.html" ]; then
             echo "✅ HTML report generated: $(ls -lh reports/dependency-check-report.html)"
-            echo "Report preview:"
-            grep -E "(<title>|vulnerabilities found|Vulnerabilities)" reports/dependency-check-report.html | head -5
+            echo "--- Report Summary ---"
+            # Извлекаем ключевую информацию из HTML-отчета
+            grep -i "vulnerabilities\|dependencies" reports/dependency-check-report.html | head -5
           else
             echo "❌ HTML report not found"
           fi
           
           if [ -f "reports/dependency-check-report.json" ]; then
             echo "✅ JSON report generated: $(ls -lh reports/dependency-check-report.json)"
-            echo "JSON summary:"
-            python3 -c "import json; data = json.load(open('reports/dependency-check-report.json')); print(f'Dependencies: {len(data[\"dependencies\"])}, Vulnerabilities: {sum(len(d.get(\"vulnerabilities\", [])) for d in data[\"dependencies\"])}')"
+            echo "--- JSON Summary ---"
+            # Быстрая проверка содержимого JSON
+            python3 << 'EOF'
+import json, os
+try:
+    if os.path.exists('reports/dependency-check-report.json'):
+        with open('reports/dependency-check-report.json', 'r') as f:
+            data = json.load(f)
+        deps = len(data.get("dependencies", []))
+        vulns = sum(len(d.get("vulnerabilities", [])) for d in data.get("dependencies", []))
+        print(f"Scanned Dependencies: {deps}")
+        print(f"Total Vulnerabilities Found: {vulns}")
+        if vulns > 0:
+            # Показываем примеры уязвимостей
+            for dep in data.get("dependencies", []):
+                if dep.get("vulnerabilities"):
+                    print(f"\nFound in: {dep.get('fileName', 'Unknown')}")
+                    for v in dep.get("vulnerabilities", [])[:2]:  # Первые 2 уязвимости
+                        print(f"  - {v.get('name', 'Unknown')}: {v.get('description', 'No description')[:100]}...")
+                    break
+except Exception as e:
+    print(f"Error reading JSON: {e}")
+EOF
           else
             echo "❌ JSON report not found"
           fi
@@ -106,5 +128,9 @@ jobs:
     steps:
       - name: Security Scan Summary
         run: |
+          echo "========================================"
           echo "✅ All security scans completed successfully!"
-          echo "SAST (SonarQube) and SCA (Dependency Check) reports are available as artifacts."
+          echo "📁 Available reports:"
+          echo "   - SonarQube (SAST) results: Check SonarCloud dashboard"
+          echo "   - Dependency Check (SCA) reports: Download 'security-reports' artifact"
+          echo "========================================"

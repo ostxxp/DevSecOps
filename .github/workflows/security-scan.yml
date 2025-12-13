@@ -66,9 +66,9 @@ jobs:
             --disableNodeJS \
             --disableRetireJS \
             --disableOssIndex \
-            --nvdApiDelay 6000 \          # Пауза между запросами к NVD (в миллисекундах)
-            --nvdMaxRetryCount 10 \       # Количество попыток при ошибках сети
-            --failOnCVSS 0                 # Завершить с ошибкой при любой найденной уязвимости
+            --nvdApiDelay 6000 \
+            --nvdMaxRetryCount 10 \
+            --failOnCVSS 0
           
           echo "✅ Scan completed!"
 
@@ -88,27 +88,7 @@ jobs:
             echo "✅ JSON report generated: $(ls -lh reports/dependency-check-report.json)"
             echo "--- JSON Summary ---"
             # Быстрая проверка содержимого JSON
-            python3 << 'EOF'
-import json, os
-try:
-    if os.path.exists('reports/dependency-check-report.json'):
-        with open('reports/dependency-check-report.json', 'r') as f:
-            data = json.load(f)
-        deps = len(data.get("dependencies", []))
-        vulns = sum(len(d.get("vulnerabilities", [])) for d in data.get("dependencies", []))
-        print(f"Scanned Dependencies: {deps}")
-        print(f"Total Vulnerabilities Found: {vulns}")
-        if vulns > 0:
-            # Показываем примеры уязвимостей
-            for dep in data.get("dependencies", []):
-                if dep.get("vulnerabilities"):
-                    print(f"\nFound in: {dep.get('fileName', 'Unknown')}")
-                    for v in dep.get("vulnerabilities", [])[:2]:  # Первые 2 уязвимости
-                        print(f"  - {v.get('name', 'Unknown')}: {v.get('description', 'No description')[:100]}...")
-                    break
-except Exception as e:
-    print(f"Error reading JSON: {e}")
-EOF
+            python3 -c "import json, os; data = json.load(open('reports/dependency-check-report.json')) if os.path.exists('reports/dependency-check-report.json') else {}; deps = len(data.get('dependencies', [])); vulns = sum(len(d.get('vulnerabilities', [])) for d in data.get('dependencies', [])); print(f'Scanned Dependencies: {deps}'); print(f'Total Vulnerabilities Found: {vulns}'); [print(f\"Found in: {dep.get('fileName', 'Unknown')}\") or [print(f\"  - {v.get('name', 'Unknown')}: {v.get('description', 'No description')[:100]}...\") for v in dep.get('vulnerabilities', [])[:2]] for dep in data.get('dependencies', []) if dep.get('vulnerabilities')][:1] if vulns > 0 else None"
           else
             echo "❌ JSON report not found"
           fi

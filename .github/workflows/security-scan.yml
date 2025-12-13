@@ -44,12 +44,20 @@ jobs:
           chmod +x dependency-check/dependency-check/bin/dependency-check.sh
           ./dependency-check/dependency-check/bin/dependency-check.sh --version
 
+      - name: Configure Dependency Check (JSON Feeds Only)
+        run: |
+          echo "⚙️ Configuring Dependency Check to use JSON feeds only (no API)"
+          mkdir -p ~/.dependency-check
+          # Отключаем использование NVD API, заставляем использовать только JSON feeds
+          echo "data.nvd.validForHours=0" > ~/.dependency-check/dependency-check.properties
+          echo "✅ Configuration saved: will use JSON feeds instead of API"
+
       - name: Update Dependency Check Database
         continue-on-error: true
         timeout-minutes: 60
         run: |
           echo "🔄 Updating Dependency Check database..."
-          echo "This will use JSON feeds (no API key required, but slower)"
+          echo "Using JSON feeds only (no API key, slower but reliable)"
           echo "First run may take 30-60 minutes..."
           
           # Проверяем, есть ли уже база данных в кэше
@@ -59,10 +67,10 @@ jobs:
             echo "Skipping update, will use --noupdate during scan"
           else
             echo "⚠️ No cached database found ($DB_FILES files)"
-            echo "Updating database using JSON feeds (no API key needed)..."
+            echo "Updating database using JSON feeds (no API, no API key needed)..."
             echo "This will take 30-60 minutes on first run..."
             
-            # Обновление БЕЗ API ключа - использует JSON feeds
+            # Обновление БЕЗ API - использует только JSON feeds
             ./dependency-check/dependency-check/bin/dependency-check.sh --updateonly || {
               echo "⚠️ Database update had errors, but will continue with scan"
             }

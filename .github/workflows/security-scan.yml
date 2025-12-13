@@ -30,55 +30,87 @@ jobs:
           unzip dependency-check-*-release.zip -d dependency-check
           chmod +x dependency-check/dependency-check/bin/dependency-check.sh
 
-      - name: Update Dependency Check Database
-        continue-on-error: true
+      - name: Debug - Check API Key
         run: |
           if [ -n "${{ secrets.NVD_API_KEY }}" ]; then
+            echo "NVD_API_KEY is set (length: ${#NVD_API_KEY})"
+            echo "First 10 chars: ${NVD_API_KEY:0:10}..."
+          else
+            echo "ERROR: NVD_API_KEY secret is NOT set!"
+            echo "Please add NVD_API_KEY to GitHub Secrets"
+          fi
+
+      - name: Update Dependency Check Database
+        continue-on-error: true
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: |
+          if [ -n "$NVD_API_KEY" ]; then
+            echo "Attempting database update with API key..."
+            # Try using environment variable first
             ./dependency-check/dependency-check/bin/dependency-check.sh \
               --updateonly \
-              --nvdApiKey "${{ secrets.NVD_API_KEY }}" \
-              --nvdApiDelay 20000 \
-              --nvdMaxRetryCount 3 || echo "Database update failed, will try to continue"
+              --nvdApiDelay 30000 \
+              --nvdMaxRetryCount 2 || {
+                echo "Update with env var failed, trying with parameter"
+                ./dependency-check/dependency-check/bin/dependency-check.sh \
+                  --updateonly \
+                  --nvdApiKey "$NVD_API_KEY" \
+                  --nvdApiDelay 30000 \
+                  --nvdMaxRetryCount 2 || echo "Database update failed completely"
+              }
           else
-            echo "Warning: NVD_API_KEY secret not set"
-            echo "Attempting update without API key (may be slow or fail)"
-            ./dependency-check/dependency-check/bin/dependency-check.sh \
-              --updateonly || echo "Update failed without API key"
+            echo "Warning: NVD_API_KEY not available, skipping update"
           fi
 
       - name: Run Dependency Check (SCA)
         continue-on-error: true
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
           mkdir -p reports
-          API_KEY="${{ secrets.NVD_API_KEY }}"
           
-          if [ -n "$API_KEY" ]; then
-            echo "Running with NVD API Key"
+          if [ -n "$NVD_API_KEY" ]; then
+            echo "Running scan with NVD API Key (using environment variable)"
+            # Try with environment variable (Dependency Check should pick it up automatically)
             ./dependency-check/dependency-check/bin/dependency-check.sh \
               --project "DVWA" \
               --scan ./app \
               --format JSON \
               --format HTML \
               --out ./reports \
-              --nvdApiKey "$API_KEY" \
-              --nvdApiDelay 20000 \
-              --nvdMaxRetryCount 3 \
+              --nvdApiDelay 30000 \
+              --nvdMaxRetryCount 2 \
               --enableExperimental \
               --failOnCVSS 11 || {
-                echo "Scan failed with API key, trying without update"
+                echo "Scan with env var failed, trying with --nvdApiKey parameter"
                 ./dependency-check/dependency-check/bin/dependency-check.sh \
                   --project "DVWA" \
                   --scan ./app \
                   --format JSON \
                   --format HTML \
                   --out ./reports \
-                  --nvdApiKey "$API_KEY" \
-                  --skipUpdate \
+                  --nvdApiKey "$NVD_API_KEY" \
+                  --nvdApiDelay 30000 \
+                  --nvdMaxRetryCount 2 \
                   --enableExperimental \
-                  --failOnCVSS 11 || true
+                  --failOnCVSS 11 || {
+                    echo "Scan with API key failed, trying with --skipUpdate"
+                    ./dependency-check/dependency-check/bin/dependency-check.sh \
+                      --project "DVWA" \
+                      --scan ./app \
+                      --format JSON \
+                      --format HTML \
+                      --out ./reports \
+                      --nvdApiKey "$NVD_API_KEY" \
+                      --skipUpdate \
+                      --enableExperimental \
+                      --failOnCVSS 11 || true
+                  }
               }
           else
-            echo "Running without NVD API Key (may have limited results)"
+            echo "Warning: NVD_API_KEY not available"
+            echo "Running scan without API key (will skip update)"
             ./dependency-check/dependency-check/bin/dependency-check.sh \
               --project "DVWA" \
               --scan ./app \

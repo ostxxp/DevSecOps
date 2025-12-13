@@ -26,7 +26,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/.dependency-check/data
-          key: dependency-check-db-${{ runner.os }}-v6
+          key: dependency-check-db-${{ runner.os }}-v7
           restore-keys: |
             dependency-check-db-${{ runner.os }}-
 
@@ -36,6 +36,17 @@ jobs:
           mkdir -p ~/.dependency-check
           echo "data.nvd.validForHours=0" > ~/.dependency-check/dependency-check.properties
           echo "✅ Configuration: JSON feeds only, no API"
+
+      - name: Download Pre-populated Database (Optional)
+        continue-on-error: true
+        run: |
+          # Если у вас есть готовая база данных в GitHub Releases или другом источнике
+          # Раскомментируйте и укажите URL:
+          # mkdir -p ~/.dependency-check/data
+          # wget -q YOUR_DATABASE_URL -O /tmp/db.tar.gz
+          # tar -xzf /tmp/db.tar.gz -C ~/.dependency-check/data
+          echo "ℹ️ Pre-populated database download skipped (not configured)"
+          echo "To use: upload database to GitHub Releases and uncomment download step"
 
       - name: Run Dependency Check Scan
         continue-on-error: true
@@ -56,9 +67,13 @@ jobs:
           else
             echo "⚠️ No cached database found ($DB_FILES files)"
             echo "Will attempt scan without database update (may have limited results)"
-            echo "Note: First successful scan will create database in cache for next runs"
-            # Используем --noupdate даже если базы нет - сканирование всё равно выполнится
-            # База создастся автоматически при первом сканировании
+            echo "Note: Reports will be generated but may not contain vulnerability data"
+            echo ""
+            echo "To get full vulnerability data:"
+            echo "  1. Update database locally: dependency-check.sh --updateonly"
+            echo "  2. Archive: tar -czf db.tar.gz ~/.dependency-check/data"
+            echo "  3. Upload to GitHub Releases"
+            echo "  4. Uncomment download step in workflow"
             USE_NOUPDATE="--noupdate"
           fi
           
@@ -89,8 +104,7 @@ jobs:
             echo "✅ Database is now available ($NEW_DB_FILES files) - will be cached for next run"
           else
             echo "⚠️ Database still empty ($NEW_DB_FILES files)"
-            echo "Reports may be generated but will not contain vulnerability data"
-            echo "Next run will attempt to populate database"
+            echo "Reports generated but may not contain vulnerability data"
           fi
           
           echo "✅ Scan completed!"

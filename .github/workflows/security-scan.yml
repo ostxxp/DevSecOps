@@ -17,59 +17,60 @@ jobs:
 
   sca-analysis:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        tool: [trivy, dependabot-check]
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Run Trivy Security Scan
-        if: matrix.tool == 'trivy'
+      - name: Run Trivy Security Scan (SCA)
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: './app'
+          format: 'json'
+          output: 'reports/trivy-report.json'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '0'
+
+      - name: Generate Trivy Report (Table Format)
         continue-on-error: true
         run: |
-          echo "🔍 Running Trivy security scan (SCA)..."
-          mkdir -p reports
-          
-          # Устанавливаем Trivy
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update
-          sudo apt-get install -y trivy
-          
-          # Сканируем зависимости проекта
-          trivy fs --format json --output reports/trivy-report.json ./app || {
-            echo "⚠️ Trivy scan completed with warnings"
-          }
-          
           trivy fs --format table --output reports/trivy-report.txt ./app || true
-          
-          echo "✅ Trivy scan completed!"
+          cat reports/trivy-report.txt || echo "Report generation failed"
 
-      - name: Check Dependabot Alerts
-        if: matrix.tool == 'dependabot-check'
+      - name: Check Generated Reports
         run: |
-          echo "📊 Checking Dependabot Security Alerts..."
-          echo "View alerts at: https://github.com/${{ github.repository }}/security/dependabot"
-          
-          # Проверяем наличие Dependabot alerts через GitHub API
-          gh api repos/${{ github.repository }}/dependabot/alerts --jq 'length' > /tmp/dependabot-count.txt || echo "0" > /tmp/dependabot-count.txt
-          COUNT=$(cat /tmp/dependabot-count.txt)
-          echo "Found $COUNT Dependabot alerts"
-          
-          if [ "$COUNT" -gt 0 ]; then
-            echo "⚠️ Security alerts found - check GitHub Security tab"
-            gh api repos/${{ github.repository }}/dependabot/alerts --jq '.[] | select(.state=="open") | "\(.dependency.package.name) - \(.security_advisory.summary)"' || true
+          echo "📊 Checking generated reports..."
+          if [ -f "reports/trivy-report.json" ]; then
+            echo "✅ Trivy JSON report generated: $(ls -lh reports/trivy-report.json)"
+            # Парсим JSON для вывода статистики
+            python3 << 'EOF'
+import json
+try:
+    with open('reports/trivy-report.json', 'r') as f:
+        data = json.load(f)
+    results = data.get('Results', [])
+    total_vulns = 0
+    for result in results:
+        vulns = result.get('Vulnerabilities', [])
+        total_vulns += len(vulns)
+        if vulns:
+            print(f"\nFound in {result.get('Target', 'Unknown')}:")
+            for v in vulns[:5]:  # Первые 5 уязвимостей
+                print(f"  - {v.get('VulnerabilityID', 'Unknown')}: {v.get('Title', 'No title')[:80]}")
+    print(f"\n✅ Total vulnerabilities found: {total_vulns}")
+except Exception as e:
+    print(f"Error reading report: {e}")
+EOF
           else
-            echo "✅ No open Dependabot alerts"
+            echo "❌ Trivy report not found"
           fi
 
       - name: Upload SCA Reports
-        if: matrix.tool == 'trivy'
         uses: actions/upload-artifact@v4
         with:
-          name: sca-reports-trivy
+          name: sca-reports
           path: reports/trivy-*
           retention-days: 30
           if-no-files-found: warn

@@ -22,131 +22,46 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Cache Dependency Check Database
-        uses: actions/cache@v3
-        with:
-          path: ~/.dependency-check/data
-          key: dependency-check-db-${{ runner.os }}-${{ hashFiles('**/composer.lock', '**/package-lock.json') }}
-          restore-keys: |
-            dependency-check-db-${{ runner.os }}-
-
-      - name: Download and Install OWASP Dependency Check
-        run: |
-          echo "📦 Downloading OWASP Dependency Check..."
-          wget -q https://github.com/jeremylong/DependencyCheck/releases/download/v10.0.0/dependency-check-10.0.0-release.zip
-          unzip -q dependency-check-10.0.0-release.zip -d dependency-check
-          chmod +x dependency-check/dependency-check/bin/dependency-check.sh
-          ./dependency-check/dependency-check/bin/dependency-check.sh --version
-
-      - name: Configure Dependency Check (JSON Feeds Only)
-        run: |
-          echo "⚙️ Configuring Dependency Check to use JSON feeds only (no API)"
-          mkdir -p ~/.dependency-check
-          # Отключаем использование NVD API, заставляем использовать только JSON feeds
-          # data.nvd.validForHours=0 заставляет использовать JSON feeds вместо API
-          cat > ~/.dependency-check/dependency-check.properties << 'PROPEOF'
-data.nvd.validForHours=0
-PROPEOF
-          echo "✅ Configuration saved: will use JSON feeds instead of API"
-          cat ~/.dependency-check/dependency-check.properties
-
-      - name: Update Dependency Check Database
+      - name: Run Dependency Check (SCA) with Docker
         continue-on-error: true
-        timeout-minutes: 60
         run: |
-          echo "🔄 Updating Dependency Check database..."
-          echo "Using JSON feeds only (no API key, slower but reliable)"
-          echo "First run may take 30-60 minutes..."
+          echo "🔍 Starting Dependency Check scan using Docker..."
+          echo "Docker image includes pre-populated database, no API key needed!"
           
-          # Проверяем, есть ли уже база данных в кэше
-          DB_FILES=$(find ~/.dependency-check/data -type f 2>/dev/null | wc -l)
-          if [ "$DB_FILES" -gt 50 ]; then
-            echo "✅ Using cached database ($DB_FILES files)"
-            echo "Skipping update, will use --noupdate during scan"
-          else
-            echo "⚠️ No cached database found ($DB_FILES files)"
-            echo "Updating database using JSON feeds (no API, no API key needed)..."
-            echo "This will take 30-60 minutes on first run..."
-            
-            # Обновление БЕЗ API - использует только JSON feeds
-            # --nvdValidForHours 0 заставляет использовать JSON feeds вместо API
-            ./dependency-check/dependency-check/bin/dependency-check.sh \
-              --updateonly \
-              --nvdValidForHours 0 || {
-              echo "⚠️ Database update had errors, but will continue with scan"
-            }
-            
-            # Проверяем результат
-            NEW_FILES=$(find ~/.dependency-check/data -type f 2>/dev/null | wc -l)
-            if [ "$NEW_FILES" -gt 50 ]; then
-              echo "✅ Database updated successfully ($NEW_FILES files)"
-            else
-              echo "⚠️ Database update incomplete ($NEW_FILES files), but will try scan anyway"
-            fi
-          fi
-
-      - name: Run Dependency Check Scan
-        continue-on-error: true
-        timeout-minutes: 30
-        run: |
-          echo "🔍 Starting Dependency Check scan..."
           mkdir -p reports
           
-          # Проверяем наличие базы данных
-          DB_FILES=$(find ~/.dependency-check/data -type f 2>/dev/null | wc -l)
-          if [ "$DB_FILES" -gt 50 ]; then
-            echo "✅ Database available ($DB_FILES files), using --noupdate"
-            NOUPDATE_FLAG="--noupdate"
-          else
-            echo "⚠️ Database incomplete ($DB_FILES files), will attempt update during scan"
-            NOUPDATE_FLAG=""
-          fi
-          
-          # Запускаем сканирование
-          # Если база пустая, используем --nvdValidForHours 0 для JSON feeds
-          if [ "$DB_FILES" -le 50 ]; then
-            echo "Using --nvdValidForHours 0 to force JSON feeds during scan"
-            NOUPDATE_FLAG="--nvdValidForHours 0"
-          fi
-          
-          ./dependency-check/dependency-check/bin/dependency-check.sh \
-            --project "DVWA" \
-            --scan ./app \
+          # Используем официальный Docker образ Dependency Check
+          # Образ уже содержит базу данных, не требует обновления
+          docker run --rm \
+            -v "$PWD:/src" \
+            -v "$PWD/reports:/report" \
+            -v "$HOME/.dependency-check/data:/usr/share/dependency-check/data" \
+            owasp/dependency-check:latest \
+            --scan /src/app \
             --format HTML \
             --format JSON \
-            --out ./reports \
-            $NOUPDATE_FLAG \
+            --out /report \
+            --project "DVWA" \
+            --noupdate \
             --enableExperimental \
             --failOnCVSS 11 || {
-              echo "⚠️ Scan completed with warnings/errors"
-              echo "This is normal if database is still updating"
+              echo "⚠️ Scan completed with warnings"
             }
           
-          echo "✅ Scan process completed!"
+          echo "✅ Scan completed!"
 
       - name: Check Generated Reports
         run: |
           echo "📊 Checking generated reports..."
           if [ -f "reports/dependency-check-report.html" ]; then
             echo "✅ HTML report generated: $(ls -lh reports/dependency-check-report.html)"
-            echo "--- Report Summary ---"
-            # Извлекаем ключевую информацию из HTML-отчета
-            grep -i "vulnerabilities\|dependencies" reports/dependency-check-report.html | head -5
           else
             echo "❌ HTML report not found"
           fi
           
           if [ -f "reports/dependency-check-report.json" ]; then
             echo "✅ JSON report generated: $(ls -lh reports/dependency-check-report.json)"
-            echo "--- JSON Summary ---"
-            # Быстрая проверка содержимого JSON
-            python3 -c "import json, os; data = json.load(open('reports/dependency-check-report.json')) if os.path.exists('reports/dependency-check-report.json') else {}; deps = len(data.get('dependencies', [])); vulns = sum(len(d.get('vulnerabilities', [])) for d in data.get('dependencies', [])); print(f'Scanned Dependencies: {deps}'); print(f'Total Vulnerabilities Found: {vulns}'); [print(f\"Found in: {dep.get('fileName', 'Unknown')}\") or [print(f\"  - {v.get('name', 'Unknown')}: {v.get('description', 'No description')[:100]}...\") for v in dep.get('vulnerabilities', [])[:2]] for dep in data.get('dependencies', []) if dep.get('vulnerabilities')][:1] if vulns > 0 else None"
+            python3 -c "import json, os; data = json.load(open('reports/dependency-check-report.json')) if os.path.exists('reports/dependency-check-report.json') else {}; deps = len(data.get('dependencies', [])); vulns = sum(len(d.get('vulnerabilities', [])) for d in data.get('dependencies', [])); print(f'Scanned Dependencies: {deps}'); print(f'Total Vulnerabilities Found: {vulns}')"
           else
             echo "❌ JSON report not found"
           fi
@@ -155,8 +70,7 @@ PROPEOF
         uses: actions/upload-artifact@v4
         with:
           name: security-reports
-          path: |
-            reports/
+          path: reports/
           retention-days: 30
           if-no-files-found: warn
 

@@ -24,30 +24,79 @@ jobs:
 
       - name: Install OWASP Dependency Check
         run: |
+          # Try latest version first (10.0.0), fallback to 9.0.9 if not available
+          wget https://github.com/jeremylong/DependencyCheck/releases/download/v10.0.0/dependency-check-10.0.0-release.zip || \
           wget https://github.com/jeremylong/DependencyCheck/releases/download/v9.0.9/dependency-check-9.0.9-release.zip
-          unzip dependency-check-9.0.9-release.zip -d dependency-check
+          unzip dependency-check-*-release.zip -d dependency-check
           chmod +x dependency-check/dependency-check/bin/dependency-check.sh
 
       - name: Update Dependency Check Database
+        continue-on-error: true
         run: |
-          ./dependency-check/dependency-check/bin/dependency-check.sh \
-            --updateonly \
-            --nvdApiKey "${{ secrets.NVD_API_KEY }}" \
-            --nvdApiDelay 6000 || true
+          if [ -n "${{ secrets.NVD_API_KEY }}" ]; then
+            ./dependency-check/dependency-check/bin/dependency-check.sh \
+              --updateonly \
+              --nvdApiKey "${{ secrets.NVD_API_KEY }}" \
+              --nvdApiDelay 20000 \
+              --nvdMaxRetryCount 3 || echo "Database update failed, will try to continue"
+          else
+            echo "Warning: NVD_API_KEY secret not set"
+            echo "Attempting update without API key (may be slow or fail)"
+            ./dependency-check/dependency-check/bin/dependency-check.sh \
+              --updateonly || echo "Update failed without API key"
+          fi
 
       - name: Run Dependency Check (SCA)
+        continue-on-error: true
         run: |
           mkdir -p reports
-          ./dependency-check/dependency-check/bin/dependency-check.sh \
-            --project "DVWA" \
-            --scan ./app \
-            --format JSON \
-            --format HTML \
-            --out ./reports \
-            --nvdApiKey "${{ secrets.NVD_API_KEY }}" \
-            --nvdApiDelay 6000 \
-            --enableExperimental \
-            --failOnCVSS 11 || true
+          API_KEY="${{ secrets.NVD_API_KEY }}"
+          
+          if [ -n "$API_KEY" ]; then
+            echo "Running with NVD API Key"
+            ./dependency-check/dependency-check/bin/dependency-check.sh \
+              --project "DVWA" \
+              --scan ./app \
+              --format JSON \
+              --format HTML \
+              --out ./reports \
+              --nvdApiKey "$API_KEY" \
+              --nvdApiDelay 20000 \
+              --nvdMaxRetryCount 3 \
+              --enableExperimental \
+              --failOnCVSS 11 || {
+                echo "Scan failed with API key, trying without update"
+                ./dependency-check/dependency-check/bin/dependency-check.sh \
+                  --project "DVWA" \
+                  --scan ./app \
+                  --format JSON \
+                  --format HTML \
+                  --out ./reports \
+                  --nvdApiKey "$API_KEY" \
+                  --skipUpdate \
+                  --enableExperimental \
+                  --failOnCVSS 11 || true
+              }
+          else
+            echo "Running without NVD API Key (may have limited results)"
+            ./dependency-check/dependency-check/bin/dependency-check.sh \
+              --project "DVWA" \
+              --scan ./app \
+              --format JSON \
+              --format HTML \
+              --out ./reports \
+              --skipUpdate \
+              --enableExperimental \
+              --failOnCVSS 11 || true
+          fi
+          
+          # Check if reports were generated
+          if [ -f reports/dependency-check-report.html ] || [ -f reports/dependency-check-report.json ]; then
+            echo "Reports generated successfully"
+            ls -lh reports/
+          else
+            echo "Warning: No reports generated"
+          fi
 
       - name: Upload Reports Artifact
         uses: actions/upload-artifact@v4

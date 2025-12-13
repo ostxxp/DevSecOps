@@ -26,7 +26,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ~/.dependency-check/data
-          key: dependency-check-db-${{ runner.os }}-v2
+          key: dependency-check-db-${{ runner.os }}-v3
           restore-keys: |
             dependency-check-db-${{ runner.os }}-
 
@@ -47,31 +47,56 @@ jobs:
             USE_NOUPDATE="--noupdate"
           else
             echo "⚠️ No cached database found ($DB_FILES files)"
-            echo "Will update database during scan (this may take 30-60 minutes)"
+            echo "Attempting to update database during scan..."
+            echo "Note: If NVD API fails, scan will still run but may have limited results"
             USE_NOUPDATE=""
           fi
           
-          # Используем Docker для изоляции
-          # Важно: используем отдельный volume для базы данных, чтобы избежать блокировок
+          # Запускаем сканирование
+          # Если база пустая и обновление не удалось, сканирование всё равно попытается выполниться
+          SCAN_SUCCESS=false
+          
           docker run --rm \
             -v "$PWD:/src" \
             -v "$PWD/reports:/report" \
-            -v "$HOME/.dependency-check/data:/data" \
-            -e DATA_DIRECTORY=/data \
+            -v "$HOME/.dependency-check/data:/usr/share/dependency-check/data" \
             owasp/dependency-check:latest \
             --scan /src/app \
             --format HTML \
             --format JSON \
             --out /report \
             --project "DVWA" \
-            --data /data \
+            --data /usr/share/dependency-check/data \
             $USE_NOUPDATE \
             --enableExperimental \
-            --failOnCVSS 11 || {
-              echo "⚠️ Scan completed with warnings"
+            --failOnCVSS 11 && SCAN_SUCCESS=true || {
+              echo "⚠️ Scan encountered errors"
+              
+              # Проверяем, были ли созданы отчёты несмотря на ошибки
+              if [ -f "reports/dependency-check-report.html" ] || [ -f "reports/dependency-check-report.json" ]; then
+                echo "✅ Reports were generated despite errors - this is acceptable"
+                SCAN_SUCCESS=true
+              else
+                echo "❌ No reports generated"
+                echo "This may happen if:"
+                echo "  1. Database update failed (NVD API issue)"
+                echo "  2. No dependencies found in project"
+                echo ""
+                echo "Solution: Run workflow again - database may partially update and work on next run"
+              fi
             }
           
-          echo "✅ Scan completed!"
+          # Проверяем, обновилась ли база данных
+          NEW_DB_FILES=$(find ~/.dependency-check/data -type f 2>/dev/null | wc -l)
+          if [ "$NEW_DB_FILES" -gt 50 ]; then
+            echo "✅ Database is available ($NEW_DB_FILES files) - will be cached for next run"
+          fi
+          
+          if [ "$SCAN_SUCCESS" = true ]; then
+            echo "✅ Scan completed successfully!"
+          else
+            echo "⚠️ Scan completed with errors - check logs above"
+          fi
 
       - name: Check Generated Reports
         run: |

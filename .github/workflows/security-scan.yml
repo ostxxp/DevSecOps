@@ -263,16 +263,5 @@ jobs:
             -F "product_name=DVWA" \
             -F "auto_create_context=true" \
             -F "close_old_findings=false"
-  
-      - name: Upload Dependency-Check report to DefectDojo
-        continue-on-error: true
-        run: |
-          curl -X POST "${{ secrets.DEFECTDOJO_URL }}/api/v2/import-scan/" \
-            -H "Authorization: Token ${{ secrets.DEFECTDOJO_API_KEY }}" \
-            -F "scan_type=Dependency Check Scan" \
-            -F "file=@reports/security-reports/dependency-check-report.json" \
-            -F "product_name=DVWA" \
-            -F "auto_create_context=true" \
-            -F "close_old_findings=false"
 
 

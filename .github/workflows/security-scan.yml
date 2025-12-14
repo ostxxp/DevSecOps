@@ -5,18 +5,15 @@ on: [push, pull_request]
 jobs:
   sonarqube:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: SonarQube Scan
-        continue-on-error: true
         uses: SonarSource/sonarqube-scan-action@v4
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        # SonarQube опционален - если токен не настроен, workflow продолжит работу
 
   sca-analysis:
     runs-on: ubuntu-latest
@@ -233,16 +230,13 @@ jobs:
   security-checks:
     runs-on: ubuntu-latest
     needs: [sonarqube, sca-analysis, dependabot-check]
-    if: always()  # Запускается даже если некоторые jobs упали
     steps:
       - name: Security Scan Summary
         run: |
           echo "========================================"
-          echo "✅ Security scans completed!"
+          echo "✅ All security scans completed successfully!"
           echo "📁 Available reports:"
-          echo "   - SonarQube (SAST): Check SonarCloud dashboard (optional)"
-          echo "   - Trivy (SCA): Download 'sca-reports' artifact"
-          echo "   - Dependabot (SCA): https://github.com/${{ github.repository }}/security/dependabot"
-          echo ""
-          echo "Note: SonarQube may fail if not configured - this is OK for SCA analysis"
+          echo "   - SonarQube (SAST) results: Check SonarCloud dashboard"
+          echo "   - Trivy (SCA) reports: Download 'sca-reports' artifact"
+          echo "   - Dependabot (SCA) alerts: https://github.com/${{ github.repository }}/security/dependabot"
           echo "========================================"
